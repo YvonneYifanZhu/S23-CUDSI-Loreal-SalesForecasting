@@ -1,0 +1,126 @@
+---
+title: "Basic_DataAnalysis"
+author: "Yifan Zhu"
+date: "2/15/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+```
+
+
+```{r}
+sellout <- read.csv("RData/train_kiehls_anonimized_sellout.csv")
+
+traffic <- read.csv("RData/rescaled_traffic_store.csv")
+
+# need to transform data type in python as well
+sellout$day <- as.Date(sellout$day)
+
+traffic$day <- as.Date(traffic$day)
+traffic[13:17] <- lapply(traffic[13:17], as.numeric)
+
+str(sellout)
+str(traffic)
+```
+
+#### find correlation within each dataframe
+```{r}
+cor(sellout[6:8])
+
+cor(traffic[13:17])
+```
+
+
+#### explore traffic ~ sellout in United States for instance
+```{r}
+us_sell <- sellout %>%
+  filter(country_name_en == "United States of America")
+
+us_traffic <- traffic %>%
+  filter(country_name_en == "United States of America")
+
+# inner join on day 
+df_merged <- us_sell %>%
+  inner_join(us_traffic, by = "day")
+
+# total_amount ~ total_nb_visitor
+cor(df_merged$total_amount, df_merged$total_nb_visitor)
+```
+
+
+```{r}
+gg_us <- ggplot(df_merged, aes(x=day))+ 
+         geom_line(aes(y = total_amount), color = "darkred") + 
+        geom_line(aes(y = total_nb_visitor), color="steelblue", linetype="twodash")
+
+gg_us
+```
+
+
+### if only consider correlation befoer COVID-19
+```{r}
+before_19 <- df_merged %>% filter(day < "2021/1/1")
+cor(before_19$total_nb_visitor, before_19$total_amount)
+
+
+after_19 <- df_merged %>% filter(day >= "2021/1/1")
+cor(after_19$total_nb_visitor, after_19$total_amount)
+
+
+ggplot(before_19, aes(x=day))+ 
+         geom_line(aes(y = total_amount), color = "darkred") + 
+        geom_line(aes(y = total_nb_visitor), color="steelblue", linetype="twodash")
+
+ggplot(after_19, aes(x=day))+ 
+         geom_line(aes(y = total_amount), color = "darkred") + 
+        geom_line(aes(y = total_nb_visitor), color="steelblue", linetype="twodash")
+```
+
+### Analysis on missing/ 0s on traffic dataset 'before_19'
+```{r}
+sapply(before_19, function(x) sum(is.na(x)))
+summary(before_19==0)
+
+# starting from 2019-10-22, the last three columns contains value not 0
+before_19 %>% filter(day=="2019-10-22")
+```
+
+
+
+#### time series analysis on df_us only 
+```{r}
+acf(df_merged$total_amount)
+pacf(df_merged$total_amount)
+```
+
+### auto arima
+```{r}
+library(forecast)
+auto.arima(df_merged$total_amount)
+```
+
+
+
+# try dynamic time wraping
+```{r}
+#install.packages("dtw")
+library(dtw)
+alignment<-dtw::dtw(before_19$total_amount,before_19$total_nb_visitor,keep=TRUE);
+
+## Display the warping curve, i.e. the alignment curve
+plot(alignment,type="threeway")
+
+```
+
+
+### TODO
+- fill 0 with mean value; therefore, if we receive data stream containing those columns in the future, we could obtain the prediction based on existing data. Or, if we drop those 0s, we will possibly drop info from data
+- adding column indicating Monday till Sunday
+- adding column indicating important U.S. holidays
+
+
+
+
