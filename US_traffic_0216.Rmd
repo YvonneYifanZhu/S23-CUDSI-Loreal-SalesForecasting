@@ -1,0 +1,84 @@
+---
+title: "US_traffic_0216"
+author: "Yifan Zhu"
+date: "2/16/2023"
+output: html_document
+---
+
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+
+```
+
+
+
+# data type investigation
+```{r}
+data <- read_excel("RData/daily_traffic_mars_old_randomized.xlsx")
+str(data)
+```
+
+
+
+# level analysis for each column
+Detailed info is written in the comment line
+
+```{r}
+unique(data$CORE_LB_Country)
+unique(data$CORE_LB_State) # 31 states in U.S
+unique(data$CORE_LB_City) # 132 cities
+
+unique(data$CORE_LB_Circuit) # 1 level direct
+unique(data$CORE_LB_StoreType) # 2 level: Outlet, Boutique
+unique(data$CORE_LB_Temporality) # 1 level: Permanent
+
+unique(data$CORE_LB_FlagShip) # 2 level: Standard, flagship
+unique(data$CORE_LB_SalesZone) # 2 level: mall, high street (needs transformation)
+unique(data$CORE_LB_CommercialSign) # 5 level: DFCCO, Kiehl's, MYX, Urban, CPD outlets
+
+```
+
+
+
+# null/missing value analysis 
+There is no missing value for location columns, "day" and "CORE_VL_NbEntry"
+
+```{r}
+sapply(data, function(x) sum(is.na(x)))
+summary(data==0)
+
+```
+
+
+
+# check if each cities have the same time range
+```{r}
+# total range is 1581
+data %>% group_by(CORE_LB_State,CORE_LB_City, CORE_LB_StoreType, 
+                  CORE_LB_FlagShip, CORE_LB_SalesZone, CORE_LB_CommercialSign)%>%
+  count()
+
+```
+
+
+
+# data transformation and preprocessing
+- Convert day to datetime type
+- Convert MALL to Mall, to be consistent
+
+```{r}
+data$CORE_LB_SalesZone <- str_replace_all(data$CORE_LB_SalesZone, "MALL", "Mall")
+data$day <- as.Date(data$day)
+
+str(data)
+```
+
+
+# write out file for Modelling
+```{r}
+write.csv(data[-1], "RData/traffic_cleaned_forPython.csv", row.names=FALSE)
+```
+
