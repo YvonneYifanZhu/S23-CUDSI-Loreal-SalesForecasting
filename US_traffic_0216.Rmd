@@ -37,7 +37,7 @@ unique(data$CORE_LB_Temporality) # 1 level: Permanent
 
 unique(data$CORE_LB_FlagShip) # 2 level: Standard, flagship
 unique(data$CORE_LB_SalesZone) # 2 level: mall, high street (needs transformation)
-unique(data$CORE_LB_CommercialSign) # 5 level: DFCCO, Kiehl's, MYX, Urban, CPD outlets
+unique(data$CORE_LB_CommercialSign) # 5 level: DFCCO, Kiehl's, NYX, Urban, CPD outlets
 
 ```
 
