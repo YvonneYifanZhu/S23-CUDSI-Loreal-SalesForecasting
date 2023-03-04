@@ -6,7 +6,7 @@ output: html_document
 ---
 
 
-
+# preparation
 ```{r}
 library(tidyverse)
 library(readxl)
@@ -17,8 +17,8 @@ library(readxl)
 
 # data type investigation
 ```{r}
-data <- read_excel("RData/daily_traffic_mars_old_randomized.xlsx")
-str(data)
+data_raw <- read_excel("RData/daily_traffic_mars_old_randomized.xlsx")
+str(data_raw)
 ```
 
 
@@ -27,6 +27,8 @@ str(data)
 Detailed info is written in the comment line
 
 ```{r}
+data <- data_raw
+
 unique(data$CORE_LB_Country)
 unique(data$CORE_LB_State) # 31 states in U.S
 unique(data$CORE_LB_City) # 132 cities
@@ -49,21 +51,13 @@ There is no missing value for location columns, "day" and "CORE_VL_NbEntry"
 ```{r}
 sapply(data, function(x) sum(is.na(x)))
 summary(data==0)
-
 ```
 
 
-
-# check if each cities have the same time range
+# investigate outlier if exists
 ```{r}
-# total range is 1581
-data %>% group_by(CORE_LB_State,CORE_LB_City, CORE_LB_StoreType, 
-                  CORE_LB_FlagShip, CORE_LB_SalesZone, CORE_LB_CommercialSign)%>%
-  count()
-
+summary(data)
 ```
-
-
 
 # data transformation and preprocessing
 - Convert day to datetime type
@@ -77,8 +71,291 @@ str(data)
 ```
 
 
+# add column weekday
+```{r}
+library(lubridate)
+data$weekday <- wday(data$day, label=TRUE, abbr = FALSE)
+```
+
+
+# add column special holiday
+more rows after left_join 
+```{r}
+# import holiday dataset https://www.kaggle.com/datasets/donnetew/us-holiday-dates-2004-2021?resource=download
+#holiday_raw <- read_csv("RData/US Holiday Dates (2004-2021).csv")
+holiday_raw <- read_excel("RData/US_holiday_labelled.xlsx")
+
+
+library(stringr)
+data$year <- as.character(data$day)
+data[c('year','month','d')] <- str_split_fixed(data$year, '-', 3)
+data$year <- as.factor(data$year)
+data$month <- as.factor(data$month)
+
+
+library(dplyr)
+data <- data %>% left_join(holiday_raw, by = c("day"="Date"))
+
+```
+
+
+# check if each level have same time range
+- Different time range
+- Data only explains sales in CA Dessert hills outlet before 2015-12-31
+```{r}
+check <- data%>%
+  group_by(day, CORE_LB_State, CORE_LB_City, CORE_LB_StoreType, 
+                  CORE_LB_FlagShip, CORE_LB_SalesZone, CORE_LB_CommercialSign) %>%
+  count() %>%
+  group_by(day) %>%
+  count()
+```
+
+
+# combine census data 
+```{r}
+library(readxl)
+
+census_by_state <- read_excel("RData/census_by_state.xlsx")
+df_merged <- data %>% left_join(census_by_state, by = c("CORE_LB_State"="State"))
+```
+
+
+
+# check if each cities have the same time range
+select certain column that we are interested, and filter day starting from 2016-1-1
+```{r}
+# total range is 1581
+subset <- df_merged %>% select(day,CORE_LB_State,CORE_LB_City, CORE_LB_StoreType, 
+                  CORE_LB_FlagShip, CORE_LB_SalesZone, CORE_LB_CommercialSign, CORE_VL_NbEntry,
+                  Holiday, weekday, year, month,
+                  Population, MHI) %>%
+  filter(day > "2015-12-31")
+
+```
+
+
+# investigate outlier
+```{r}
+summary(subset)
+```
+
+# test correlation on census data with traffic
+```{r}
+cor.test(subset$Population, subset$CORE_VL_NbEntry)
+cor.test(subset$MHI, subset$CORE_VL_NbEntry)
+```
+
+
+
+
+
+# basic visualization
+
+# total number of different type of store
+- different time range
+```{r}
+by_trend <- subset %>%
+  group_by(day, CORE_LB_StoreType, CORE_LB_SalesZone, CORE_LB_CommercialSign) %>%
+  count()
+
+p_trend <- ggplot(by_trend, aes(x=day, y=n, group=CORE_LB_SalesZone))+
+  geom_line(aes(color=CORE_LB_SalesZone)) +
+  facet_wrap(. ~CORE_LB_StoreType+CORE_LB_CommercialSign, ncol = 2)+
+  scale_color_manual(values=c("#999999", "#E69F00", "#56B4E9"))+
+  xlab("day")+
+  ggtitle("total number of store in by type in U.S")  
+
+p_trend
+```
+
+
+
+# total aggregated trend
+```{r}
+total_trend <- subset %>%
+  filter(CORE_LB_CommercialSign=="KIEHL'S") %>%
+  group_by(day) %>%
+  summarise(K_traffic = sum(CORE_VL_NbEntry),.groups = 'drop') %>%
+  left_join(holiday_raw, by = c("day"="Date"))
+
+ p_total <- ggplot(total_trend, aes(x=day, y=K_traffic)) +
+  geom_line(color="steelblue",) + 
+  xlab("day")+
+  ggtitle("total trend in U.S")
+
+```
+
+
+Yearly peak around Nov.23 - Nov.25, second peak at Dec.22-Dec.23, third peak around Dec.16- Dec.17 before Christmas
+```{r}
+library(plotly)
+fig <- plot_ly(total_trend, type = 'scatter', mode = 'lines')%>%
+  add_trace(x = ~day, y = ~K_traffic, name = 'traffic')%>%
+  layout(showlegend = F)
+
+fig <- fig %>%
+  layout(
+         xaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         yaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         plot_bgcolor='#e5ecf6', width = 900)
+
+fig
+
+```
+
+```{r}
+total_trend %>% filter(day=='2016-11-24')
+total_trend %>% filter(day=='2016-11-25')
+total_trend %>% filter(day=='2016-11-23')
+
+```
+
+# aggregate on state
+```{r}
+by_state <- subset %>%
+  group_by(day, CORE_LB_State, CORE_LB_City) %>%
+  summarise(total_entry = sum(CORE_VL_NbEntry),.groups = 'drop')
+
+```
+
+
+
+# visaulization by type and other factor
+```{r}
+by_type <- subset %>%
+  group_by(day, CORE_LB_StoreType, CORE_LB_SalesZone, CORE_LB_CommercialSign) %>%
+  summarise(total_entry = sum(CORE_VL_NbEntry),.groups = 'drop')
+
+p_type <- ggplot(by_type, aes(x=day, y=total_entry, group=CORE_LB_SalesZone))+
+  geom_line(aes(color=CORE_LB_SalesZone)) +
+  facet_wrap(. ~CORE_LB_StoreType+CORE_LB_CommercialSign, ncol = 2)+
+  scale_color_manual(values=c("#999999", "#E69F00", "#56B4E9"))+
+  xlab("day")+
+  ggtitle("total Entry in U.S by store type")  
+
+p_type
+```
+
+# facet by plotly to investigate the trend for KIEHL'S
+```{r}
+fig2 <- by_type %>%
+  filter(CORE_LB_CommercialSign == "KIEHL'S") %>%
+  plot_ly(type = 'scatter', mode = 'lines')%>%
+  add_trace(x = ~day, y = ~total_entry, color= ~CORE_LB_SalesZone, name = 'traffic')%>%
+  layout(showlegend = F)
+
+fig2
+```
+
+
+# visualize traffic in holiday window
+
+
+
+
+
+
+# try out GLMM
+- no # of count and cos sin transformation in data frame
+- if focus on KIEHL'S only, there is only one type
+```{r}
+subset <- subset %>% 
+  arrange(mdy(subset$day))
+```
+
+```{r}
+subset <- subset[order(as.Date(subset$day, format="%d/%m/%Y"), decreasing=FALSE),]
+
+df_GLMM <- subset %>%
+  filter(CORE_LB_CommercialSign == "KIEHL'S")
+
+df_GLMM[is.na(df_GLMM)] <- "none"
+
+# train - test split in R
+# train on first 0.75
+obs <- nrow(df_GLMM) 
+df_train <- df_GLMM %>% filter(row_number() < obs * 0.75)
+df_test <- df_GLMM %>% filter(row_number() >= obs * 0.75)
+  
+```
+
+
+```{r}
+library(lme4)
+model_1 <- glmer(CORE_VL_NbEntry ~CORE_LB_State+
+                   #CORE_LB_City+
+                   #CORE_LB_StoreType+
+                   #CORE_LB_CommericalSign+
+                  CORE_LB_FlagShip+
+                   CORE_LB_SalesZone+ 
+                  #year+
+                   Holiday+
+                   as.factor(weekday)+
+                   as.factor(month)+
+                   Population+MHI+
+                  (1|CORE_LB_State), data=df_train)
+summary(model_1) 
+```
+
+```{r}
+x_train <- df_train %>% 
+  select(CORE_LB_State,
+                   CORE_LB_City,
+                  CORE_LB_FlagShip,
+                   CORE_LB_SalesZone, 
+                  #year,
+         Holiday,weekday,month,
+                   Population,MHI)
+
+y_hat_train <- predict(model_1, data = x_train)
+mean((df_train$CORE_VL_NbEntry - y_hat_train)^2)
+# 26.31719
+
+
+x_test <- df_test %>% 
+  select(CORE_LB_State,
+                   #CORE_LB_City,
+                  CORE_LB_FlagShip,
+                   CORE_LB_SalesZone, 
+                  #year,
+         Holiday,weekday,month,
+                   Population, MHI)
+
+y_hat_test <- predict(model_1, x_test)
+MSE <- mean((df_test$CORE_VL_NbEntry - y_hat_test)^2)
+sqrt(MSE)
+```
+
+
+# fit on auto arima model
+
+```{r}
+library(forecast)
+library(caret) 
+
+# fit auto.arima
+model_arima <- auto.arima(df_train$CORE_VL_NbEntry)
+summary(model_arima)
+
+# forecasting
+pred <- forecast(model_arima,h=nrow(x_test))
+
+# evaluation
+RMSE(df_test$CORE_VL_NbEntry, pred$fitted)
+```
+
+
+
 # write out file for Modelling
 ```{r}
-write.csv(data[-1], "RData/traffic_cleaned_forPython.csv", row.names=FALSE)
+write.csv(subset, "RData/traffic_cleaned_forPython.csv", row.names=FALSE)
+
+df_k <- subset%>% filter(CORE_LB_CommercialSign == "KIEHL'S")
+write.csv(df_k, "RData/traffic_cleaned_forPython_k.csv", row.names=FALSE)
 ```
 
